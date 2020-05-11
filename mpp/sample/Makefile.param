@@ -1,0 +1,125 @@
+# Hisilicon Hi35xx sample Makefile.param
+
+ifeq ($(PARAM_FILE), )
+     PARAM_FILE:=../../Makefile.param
+     include $(PARAM_FILE)
+endif
+
+################# select sensor type for your sample #################
+####    SONY_IMX335_MIPI_5M_30FPS_12BIT              #################
+####    SONY_IMX335_MIPI_3M_30FPS_12BIT              #################
+####    SONY_IMX335_MIPI_4M_30FPS_12BIT              #################
+####    SONY_IMX327_MIPI_2M_30FPS_12BIT              #################
+####    SONY_IMX327_MIPI_2M_30FPS_12BIT_WDR2TO1      #################
+####    SONY_IMX307_MIPI_2M_30FPS_12BIT              #################
+####    SONY_IMX307_MIPI_2M_30FPS_12BIT_WDR2TO1      #################
+####    SONY_IMX335_MIPI_4M_30FPS_10BIT_WDR2TO1      #################
+####    OMNIVISION_OS05A_MIPI_5M_30FPS_12BIT         #################
+####    BT1120_2M_30FPS_8BIT                         #################
+
+#### the previous sequence only for Hi3516EV300,Hi3516DV200 etc. #####
+
+####    BT656_2M_30FPS_8BIT                          #################
+####    SONY_IMX307_2L_MIPI_2M_30FPS_12BIT           #################
+####    SONY_IMX307_2L_MIPI_2M_30FPS_12BIT_WDR2TO1   #################
+####    SONY_IMX327_2L_MIPI_2M_30FPS_12BIT           #################
+####    SONY_IMX327_2L_MIPI_2M_30FPS_12BIT_WDR2TO1   #################
+####    SMART_SC4236_MIPI_3M_30FPS_10BIT             #################
+####    SMART_SC4236_MIPI_3M_20FPS_10BIT             #################
+####    SMART_SC2235_DC_2M_30FPS_10BIT               #################
+####    SMART_SC2231_MIPI_2M_30FPS_10BIT             #################
+####    SMART_SC3235_MIPI_3M_30FPS_10BIT             #################
+####    GALAXYCORE_GC2053_MIPI_2M_30FPS_10BIT        #################
+####    GALAXYCORE_GC2053_MIPI_2M_30FPS_10BIT_FORCAR #################
+
+SENSOR0_TYPE ?= SONY_IMX335_MIPI_3M_30FPS_12BIT 
+
+SENSOR_LIBS := $(REL_LIB)/lib_hiae.a
+SENSOR_LIBS += $(REL_LIB)/libisp.a
+SENSOR_LIBS += $(REL_LIB)/lib_hidehaze.a
+SENSOR_LIBS += $(REL_LIB)/lib_hidrc.a
+SENSOR_LIBS += $(REL_LIB)/lib_hildci.a
+SENSOR_LIBS += $(REL_LIB)/lib_hiawb.a
+SENSOR_LIBS += $(REL_LIB)/lib_hiir_auto.a
+SENSOR_LIBS += $(REL_LIB)/libsns_imx327.a
+SENSOR_LIBS += $(REL_LIB)/libsns_imx307.a
+SENSOR_LIBS += $(REL_LIB)/libsns_imx307_2l.a
+SENSOR_LIBS += $(REL_LIB)/libsns_imx327_2l.a
+SENSOR_LIBS += $(REL_LIB)/libsns_imx335.a
+SENSOR_LIBS += $(REL_LIB)/libsns_sc4236.a
+SENSOR_LIBS += $(REL_LIB)/libsns_sc2235.a
+SENSOR_LIBS += $(REL_LIB)/libsns_sc2231.a
+SENSOR_LIBS += $(REL_LIB)/libsns_sc3235.a
+SENSOR_LIBS += $(REL_LIB)/libsns_gc2053.a
+SENSOR_LIBS += $(REL_LIB)/libsns_gc2053_forcar.a
+SENSOR_LIBS += $(REL_LIB)/libsns_os05a.a
+MPI_LIBS := $(REL_LIB)/libmpi.a
+
+COMMON_DIR ?= $(PWD)/../common
+AUDIO_ADP_DIR ?= $(PWD)/../audio/adp
+
+INC_FLAGS := -I$(REL_INC)
+
+ISP_VERSION := ISP_V2
+
+CFLAGS += -Wall -g $(INC_FLAGS) -D$(HIARCH) -D$(HI_FPGA) -lpthread -lm -ldl -D$(ISP_VERSION)
+CFLAGS += -lstdc++
+CFLAGS += $(LIBS_CFLAGS)
+CFLAGS += $(MPP_CFLAGS)
+CFLAGS += -DSENSOR0_TYPE=$(SENSOR0_TYPE)
+
+
+################ select audio codec type for your sample ################
+ACODEC_TYPE ?= ACODEC_TYPE_INNER
+#external acodec
+#ACODEC_TYPE ?= ACODEC_TYPE_TLV320AIC31
+INNER_HDMI ?= n
+
+ifeq ($(ACODEC_TYPE), ACODEC_TYPE_INNER)
+	CFLAGS += -DHI_ACODEC_TYPE_INNER
+endif
+
+ifeq ($(ACODEC_TYPE), ACODEC_TYPE_TLV320AIC31)
+	CFLAGS += -DHI_ACODEC_TYPE_TLV320AIC31
+	INC_FLAGS += -I$(SDK_PATH)/$(EXTDRV)/tlv320aic31
+endif
+
+ifeq ($(INNER_HDMI), y)
+	CFLAGS += -DHI_ACODEC_TYPE_HDMI
+endif
+
+################ select audio module library type for your sample ################
+AUDIO_MODULE_LIB_TYPE ?= AUDIO_LIB_TYPE_STATIC
+#AUDIO_MODULE_LIB_TYPE ?= AUDIO_LIB_TYPE_SHARE
+ifeq ($(AUDIO_MODULE_LIB_TYPE), AUDIO_LIB_TYPE_STATIC)
+##### VQE #####
+	CFLAGS += -DHI_VQE_USE_STATIC_MODULE_REGISTER
+	AUDIO_LIBA += $(REL_LIB)/libhive_RES.a
+	AUDIO_LIBA += $(REL_LIB)/libhive_record.a
+	AUDIO_LIBA += $(REL_LIB)/libhive_HPF.a
+	AUDIO_LIBA += $(REL_LIB)/libhive_ANR.a
+	AUDIO_LIBA += $(REL_LIB)/libhive_AEC.a
+	AUDIO_LIBA += $(REL_LIB)/libhive_AGC.a
+	AUDIO_LIBA += $(REL_LIB)/libhive_EQ.a
+##### AAC #####
+	CFLAGS += -DHI_AAC_USE_STATIC_MODULE_REGISTER
+	AUDIO_LIBA += $(REL_LIB)/libaacdec.a
+	AUDIO_LIBA += $(REL_LIB)/libaacenc.a
+	AUDIO_LIBA += $(REL_LIB)/libaaccomm.a
+	CFLAGS += -DHI_AAC_HAVE_SBR_LIB
+	AUDIO_LIBA += $(REL_LIB)/libaacsbrdec.a
+	AUDIO_LIBA += $(REL_LIB)/libaacsbrenc.a
+endif
+
+#########################################################################
+COMM_SRC := $(wildcard $(COMMON_DIR)/*.c)
+COMM_OBJ := $(COMM_SRC:%.c=%.o)
+COMM_INC := -I$(COMMON_DIR)
+COMM_INC += -I$(AUDIO_ADP_DIR)
+
+#########################################################################
+LITEOS_BIN_SUPPORT_VI := y
+
+ifeq ($(LITEOS_BIN_SUPPORT_VI), y)
+
+endif
