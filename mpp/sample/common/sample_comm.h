@@ -38,6 +38,7 @@
 #include "hi_math.h"
 #include "hi_sns_ctrl.h"
 #include "mpi_vgs.h"
+#include "iniparser.h"
 
 #ifdef __cplusplus
 #if __cplusplus
@@ -197,11 +198,28 @@ typedef enum hiSAMPLE_RC_E
 /*******************************************************
     structure define
 *******************************************************/
+typedef struct hiYJSNPI_VENC_CONFIG_S
+{
+    PIC_SIZE_E			res[2]; 	// resolution 
+	PAYLOAD_TYPE_E  	enc[2];		// enc. type
+	SAMPLE_RC_E     	rc[2];		// rate control
+	HI_U32				kbps[2];	// bitrate
+	VENC_GOP_MODE_E 	gop[2];		// gop mode
+	HI_BOOL				dis;		// dis en
+	char  				save[128];	// ch0 save file name
+	HI_S16				lport;		// udp listen port
+	HI_S16				dport;		// udp dest. port
+	char 				daddr[16];	// udp dest. addr (char)
+	HI_U32          	profile[2];	// encode profile
+    
+} YJSNPI_VENC_CONFIG_S;
+
 typedef struct hiSAMPLE_VENC_GETSTREAM_PARA_S
 {
     HI_BOOL bThreadStart;
     VENC_CHN VeChn[VENC_MAX_CHN_NUM];
     HI_S32  s32Cnt;
+    YJSNPI_VENC_CONFIG_S conf;	// add by yjsnpi
 } SAMPLE_VENC_GETSTREAM_PARA_S;
 
 typedef struct hiSAMPLE_VENC_QPMAP_SENDFRAME_PARA_S
@@ -526,6 +544,13 @@ HI_S32 SAMPLE_COMM_VENC_StartGetStream_Svc_t(HI_S32 s32Cnt);
 HI_S32 SAMPLE_COMM_VENC_GetGopAttr(VENC_GOP_MODE_E enGopMode, VENC_GOP_ATTR_S *pstGopAttr);
 HI_S32 SAMPLE_COMM_VENC_QpmapSendFrame(VPSS_GRP VpssGrp, VPSS_CHN VpssChn[], VENC_CHN VeChn[], HI_S32 s32Cnt, SIZE_S stSize[]);
 HI_S32 SAMPLE_COMM_VENC_StopSendQpmapFrame(void);
+
+HI_S32 SAMPLE_COMM_YJSNPIVENC_StartGetStream(VENC_CHN VeChn[], HI_S32 s32Cnt, YJSNPI_VENC_CONFIG_S *pconf);
+HI_VOID* SAMPLE_COMM_YJSNPIVENC_GetVencStreamProc(HI_VOID* p);
+HI_S32 SAMPLE_COMM_YJSNPIVENC_Start(VENC_CHN VencChn, HI_S32 chn, YJSNPI_VENC_CONFIG_S *pconf, HI_BOOL bRcnRefShareBuf);
+HI_S32 SAMPLE_COMM_YJSNPIVENC_Creat(VENC_CHN VencChn, HI_S32 chn, YJSNPI_VENC_CONFIG_S *pconf, HI_BOOL bRcnRefShareBuf);
+HI_S32 SAMPLE_COMM_YJSNPIVENC_SaveStream(FILE* pFd, VENC_STREAM_S* pstStream);
+
 
 HI_S32 SAMPLE_COMM_REGION_Create(HI_S32 HandleNum, RGN_TYPE_E enType);
 HI_S32 SAMPLE_COMM_REGION_Destroy(HI_S32 HandleNum, RGN_TYPE_E enType);

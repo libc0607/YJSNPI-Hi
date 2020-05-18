@@ -1,11 +1,10 @@
 /******************************************************************************
   File Name     : yjsnpi-venc.c
   Version       : Initial Draft
-  Author        : 
+  Author        : libc0607
   Created       : 2020
-  Description   : 1296P_30fps_H.265e_QVBR_main + 360P_30fps_H.264e_CBR_base
-  
-  To-do: read config from .ini file & send h.264 stream to udp://
+  Description   : 
+  Usage: ./yjsnpi-venc conf.ini /var/tmp/mmcblock0
 ******************************************************************************/
 
 #ifdef __cplusplus
@@ -20,16 +19,17 @@ extern "C" {
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
-
+#include <utime.h>
+#include <resolv.h>
+#include <endian.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/time.h>
+#include <arpa/inet.h>
+#include "iniparser.h"
 #include "sample_comm.h"
 
-#define BIG_STREAM_SIZE     PIC_2304x1296
-#define SMALL_STREAM_SIZE   PIC_360P
-
 #define VB_MAX_NUM            10
-#define ONLINE_LIMIT_WIDTH    2304
-
-#define WRAP_BUF_LINE_EXT     416
 
 
 typedef struct hiSAMPLE_VPSS_ATTR_S
@@ -60,15 +60,178 @@ typedef struct hiSAMPLE_VB_ATTR_S
     HI_U32            supplementConfig;
 } SAMPLE_VB_ATTR_S;
 
-
 /******************************************************************************
 * function : show usage
 ******************************************************************************/
 void SAMPLE_VENC_Usage(char* sPrgNm)
 {
     printf("Usage : %s \n", sPrgNm);
-	printf("1296P @30fps H.265e AVBR(QVBR?)+ 360P @30fps H.264e CBR.\n");
+	printf("./yjsnpi-venc conf.ini /var/tmp/mmcblock0\n");
     return;
+}
+
+/******************************************************************************
+* function : get config from ini dict.
+* just a quick & dirty hack, don't be serious
+******************************************************************************/
+HI_S32 SAMPLE_YJSNPI_GetConfigFromIni(YJSNPI_VENC_CONFIG_S *pconf, dictionary * ini)
+{
+	char buf[128];
+	char * str;
+	HI_S32 tmp;
+	struct timeval stamp;
+	
+	// clear
+	memset(pconf, 0, sizeof(YJSNPI_VENC_CONFIG_S));
+	
+	// global
+	// 2轴dis 曾经想开 开了发现效果贼差 
+	pconf->dis = HI_FALSE;
+	
+	// ch0 
+	// ch0 enc
+	tmp = iniparser_getint(ini, "venc:ch0_enc", 0);
+	if (tmp == 265) {
+		pconf->enc[0] = PT_H265;
+	}
+	else if (tmp == 264) {
+		pconf->enc[0] = PT_H264;
+	} 
+	else {
+		printf("YJSNPI VENC config: Warning: ch0_enc not set. Use default h265\n");
+		pconf->enc[0] = PT_H265;
+	} 
+
+	// ch0 res
+	// 不用改了 反正低了也不增加帧率……就默认让它最大
+	pconf->res[0] = PIC_2304x1296;
+	
+	// ch0 rc
+	// note that SAMPLE_RC_E[0]=CBR so default is CBR 
+	pconf->rc[0] = iniparser_getint(ini, "venc:ch0_rc", 0);
+	
+	// ch0 kbps
+	pconf->kbps[0] = iniparser_getint(ini, "venc:ch0_kbps", 0);
+	if (pconf->kbps[0] > 20480 || pconf->kbps[0] < 512) {		// a little limit
+		printf("YJSNPI VENC config: Warning: ch0_kbps out of range (512 ~ 20480). Use default 2048kbps \n");
+		pconf->kbps[0] = 2048;
+	}
+	// ch0 gop
+	tmp = iniparser_getint(ini, "venc:ch0_gop", 0);
+	if (tmp == 0) {
+		pconf->gop[0] = VENC_GOPMODE_NORMALP;
+	}
+	else if (tmp == 1) {
+		pconf->gop[0] = VENC_GOPMODE_DUALP;
+	} 
+	else if (tmp == 2) {
+		pconf->gop[0] = VENC_GOPMODE_SMARTP;
+	}
+	else {
+		printf("YJSNPI VENC config: Warning: ch0_gop not set. Use default NORMAL\n");
+		pconf->gop[0] = VENC_GOPMODE_NORMALP;
+	}
+	// ch0 savedir (by timestamp)
+	// example: 
+	// ch0_savedir=/var/tmp/mmcblock0/save
+	// dest. video: /var/tmp/mmcblock0/save/0123456789.h26x
+	memset(buf, 0, sizeof(buf));
+	gettimeofday(&stamp, NULL);
+	str = (char *)iniparser_getstring(ini, "venc:ch0_savedir", NULL);
+	if (strlen(str) > 100) {
+		printf("YJSNPI VENC config: Error: ch0_savedir tooooooo long.\n");
+		return HI_FAILURE;
+	}
+	strncpy(buf, str, strlen(str));
+	buf[strlen(str)] = '/';	// add seperate
+	snprintf(buf+strlen(str)+1, 11, "%010ld", stamp.tv_sec);
+	if (pconf->enc[0] == PT_H264) {
+		strncpy(buf+strlen(str)+11, ".h264", 5);
+	} else if (pconf->enc[0] == PT_H265) {
+		strncpy(buf+strlen(str)+11, ".h265", 5);
+	}
+	strncpy(pconf->save, buf, strlen(buf));
+	
+	
+	// ch1 
+	// ch1 enc
+	tmp = iniparser_getint(ini, "venc:ch1_enc", 0);
+	if (tmp == 265) {
+		pconf->enc[1] = PT_H265;
+	}
+	else if (tmp == 264) {
+		pconf->enc[1] = PT_H264;
+	} 
+	else {
+		printf("YJSNPI VENC config: Warning: ch1_enc not set. Use default h264\n");
+		pconf->enc[1] = PT_H264;
+	} 
+	// ch1 res
+	tmp = iniparser_getint(ini, "venc:ch1_res", 0);
+	if (tmp == 360) {
+		pconf->res[1] = PIC_360P;
+	}
+	else if (tmp == 240) {
+		pconf->res[1] = PIC_CIF;
+	} 
+	else if (tmp == 480) {
+		pconf->res[1] = PIC_D1_NTSC;
+	} 
+	else {
+		printf("YJSNPI VENC config: Warning: ch1_res not set. Use default CIF\n");
+		pconf->res[1] = PIC_CIF;
+	} 
+
+	// ch1 rc
+	// note that SAMPLE_RC_E[0]=CBR so default is CBR 
+	pconf->rc[1] = iniparser_getint(ini, "venc:ch1_rc", 0);
+	// ch1 kbps
+	pconf->kbps[1] = iniparser_getint(ini, "venc:ch1_kbps", 0);
+	if (pconf->kbps[1] > 4096 || pconf->kbps[1] < 128) {		// a little limit
+		printf("YJSNPI VENC config: Warning: ch1_kbps out of range (128 ~ 4096). Use default 512kbps \n");
+		pconf->kbps[1] = 512;
+	}
+	// ch1 gop
+	// default VENC_GOPMODE_NORMALP=0
+	tmp = iniparser_getint(ini, "venc:ch1_gop", 0);
+	if (tmp == 0) {
+		pconf->gop[1] = VENC_GOPMODE_NORMALP;
+	}
+	else if (tmp == 1) {
+		pconf->gop[1] = VENC_GOPMODE_DUALP;
+	} 
+	else if (tmp == 2) {
+		pconf->gop[1] = VENC_GOPMODE_SMARTP;
+	}
+	else {
+		printf("YJSNPI VENC config: Warning: ch1_gop not set. Use default NORMAL\n");
+		pconf->gop[1] = VENC_GOPMODE_NORMALP;
+	}
+	
+	// ch1 udp listen port
+	pconf->lport = atoi(iniparser_getstring(ini, "venc:ch1_udp_bind_port", NULL));
+	// ch1 udp dest. port
+	pconf->dport = atoi(iniparser_getstring(ini, "venc:ch1_udp_send_port", NULL));
+	// ch1 udp dest. ip
+	str = (char *)iniparser_getstring(ini, "venc:ch1_udp_send_ip", NULL);
+	strncpy(pconf->daddr, str, sizeof(pconf->daddr));
+	 
+	// encode profile 
+	// default: h265=main, h264=main
+	// 0-base(264)/main(265), 1-main(264)/main10(265), 2-high(264),3-svc-t(264)
+	pconf->profile[0] = (pconf->enc[0] == PT_H265)? 0: 1;
+	pconf->profile[1] = (pconf->enc[1] == PT_H265)? 0: 1;
+
+	// print all info
+	fprintf(stderr, "YJSNPI VENC settings: \n");
+	fprintf(stderr, "DIS: %d \n", pconf->dis);
+	fprintf(stderr, "CH0: enc %d, res %d, rc %d, kbps %d, gop %d, savedir %s \n",
+				pconf->enc[0], pconf->res[0], pconf->rc[0], pconf->kbps[0], pconf->gop[0], pconf->save);
+	fprintf(stderr, "CH1: enc %d, res %d, rc %d, kbps %d, gop %d, lport %d, dport %d, udpip %s \n",
+				pconf->enc[1], pconf->res[1], pconf->rc[1], pconf->kbps[1], pconf->gop[1], 
+				pconf->lport, pconf->dport, pconf->daddr);
+
+	return HI_SUCCESS;
 }
 
 /******************************************************************************
@@ -103,8 +266,7 @@ static HI_U32 GetFullLinesStdFromSensorType(SAMPLE_SNS_TYPE_E enSnsType)
 {
     HI_U32 FullLinesStd = 0;
 
-    switch (enSnsType)
-    {
+    switch (enSnsType) {
         case SONY_IMX327_MIPI_2M_30FPS_12BIT:
         case SONY_IMX327_MIPI_2M_30FPS_12BIT_WDR2TO1:
             FullLinesStd = 1125;
@@ -113,8 +275,6 @@ static HI_U32 GetFullLinesStdFromSensorType(SAMPLE_SNS_TYPE_E enSnsType)
         case SONY_IMX307_MIPI_2M_30FPS_12BIT_WDR2TO1:
         case SONY_IMX307_2L_MIPI_2M_30FPS_12BIT:
         case SONY_IMX307_2L_MIPI_2M_30FPS_12BIT_WDR2TO1:
-        case SMART_SC2235_DC_2M_30FPS_10BIT:
-        case SMART_SC2231_MIPI_2M_30FPS_10BIT:
             FullLinesStd = 1125;
             break;
         case SONY_IMX335_MIPI_5M_30FPS_12BIT:
@@ -123,16 +283,8 @@ static HI_U32 GetFullLinesStdFromSensorType(SAMPLE_SNS_TYPE_E enSnsType)
             break;
         case SONY_IMX335_MIPI_4M_30FPS_12BIT:
         case SONY_IMX335_MIPI_4M_30FPS_10BIT_WDR2TO1:
-	case SONY_IMX335_MIPI_3M_30FPS_12BIT:	// wait to be tested: what does 'FullLinesStd' means?
+	    case SONY_IMX335_MIPI_3M_30FPS_12BIT:	// wait to be tested: what does 'FullLinesStd' means?
             FullLinesStd = 1375;
-            break;
-        case SMART_SC4236_MIPI_3M_30FPS_10BIT:
-        case SMART_SC4236_MIPI_3M_20FPS_10BIT:
-            FullLinesStd = 1600;
-            break;
-        case GALAXYCORE_GC2053_MIPI_2M_30FPS_10BIT:
-        case GALAXYCORE_GC2053_MIPI_2M_30FPS_10BIT_FORCAR:
-            FullLinesStd = 1108;
             break;
         default:
             SAMPLE_PRT("Error: Not support this sensor now! ==> %d\n",enSnsType);
@@ -140,19 +292,6 @@ static HI_U32 GetFullLinesStdFromSensorType(SAMPLE_SNS_TYPE_E enSnsType)
     }
 
     return FullLinesStd;
-}
-
-static HI_VOID AdjustWrapBufLineBySnsType(SAMPLE_SNS_TYPE_E enSnsType, HI_U32 *pWrapBufLine)
-{
-    /*some sensor as follow need to expand the wrapBufLine*/
-    if ((enSnsType == SMART_SC4236_MIPI_3M_30FPS_10BIT) ||
-        (enSnsType == SMART_SC4236_MIPI_3M_20FPS_10BIT) ||
-        (enSnsType == SMART_SC2235_DC_2M_30FPS_10BIT))
-    {
-        *pWrapBufLine += WRAP_BUF_LINE_EXT;
-    }
-
-    return;
 }
 
 static HI_VOID GetSensorResolution(SAMPLE_SNS_TYPE_E enSnsType, SIZE_S *pSnsSize)
@@ -179,25 +318,6 @@ static HI_VOID GetSensorResolution(SAMPLE_SNS_TYPE_E enSnsType, SIZE_S *pSnsSize
     return;
 }
 
-static VI_VPSS_MODE_E GetViVpssModeFromResolution(SAMPLE_SNS_TYPE_E SnsType)
-{
-    SIZE_S SnsSize = {0};
-    VI_VPSS_MODE_E ViVpssMode;
-
-    GetSensorResolution(SnsType, &SnsSize);
-
-    if (SnsSize.u32Width > ONLINE_LIMIT_WIDTH)
-    {
-        ViVpssMode = VI_OFFLINE_VPSS_ONLINE;
-    }
-    else
-    {
-        ViVpssMode = VI_ONLINE_VPSS_ONLINE;
-    }
-
-    return ViVpssMode;
-}
-
 static HI_VOID SAMPLE_VENC_GetDefaultVpssAttr(SAMPLE_SNS_TYPE_E enSnsType, HI_BOOL *pChanEnable, SIZE_S stEncSize[], SAMPLE_VPSS_CHN_ATTR_S *pVpssAttr)
 {
     HI_S32 i;
@@ -208,13 +328,15 @@ static HI_VOID SAMPLE_VENC_GetDefaultVpssAttr(SAMPLE_SNS_TYPE_E enSnsType, HI_BO
     pVpssAttr->enPixelFormat  = PIXEL_FORMAT_YVU_SEMIPLANAR_420;
     pVpssAttr->bWrapEn        = 0;
     pVpssAttr->enSnsType      = enSnsType;
-    pVpssAttr->ViVpssMode     = GetViVpssModeFromResolution(enSnsType);
-
+    pVpssAttr->ViVpssMode     = VI_ONLINE_VPSS_ONLINE;
+    //pVpssAttr->ViVpssMode     = VI_ONLINE_VPSS_OFFLINE;
+    
     for (i = 0; i < VPSS_MAX_PHY_CHN_NUM; i++)
     {
         if (HI_TRUE == pChanEnable[i])
         {
-            pVpssAttr->enCompressMode[i]          = (i == 0)? COMPRESS_MODE_SEG : COMPRESS_MODE_NONE;
+            //pVpssAttr->enCompressMode[i]          = (i == 0)? COMPRESS_MODE_SEG : COMPRESS_MODE_NONE;
+            pVpssAttr->enCompressMode[i]          = COMPRESS_MODE_NONE;
             pVpssAttr->stOutPutSize[i].u32Width   = stEncSize[i].u32Width;
             pVpssAttr->stOutPutSize[i].u32Height  = stEncSize[i].u32Height;
             pVpssAttr->stFrameRate[i].s32SrcFrameRate  = -1;
@@ -410,7 +532,7 @@ static HI_S32 SAMPLE_VENC_VPSS_ChnEnable(VPSS_GRP VpssGrp, VPSS_CHN VpssChn, SAM
     HI_S32 s32Ret;
     VPSS_CHN_ATTR_S     stVpssChnAttr;
     VPSS_CHN_BUF_WRAP_S stVpssChnBufWrap;
-
+		
     memset(&stVpssChnAttr, 0, sizeof(VPSS_CHN_ATTR_S));
     stVpssChnAttr.u32Width                     = pParam->stOutPutSize[VpssChn].u32Width;
     stVpssChnAttr.u32Height                    = pParam->stOutPutSize[VpssChn].u32Height;
@@ -418,13 +540,8 @@ static HI_S32 SAMPLE_VENC_VPSS_ChnEnable(VPSS_GRP VpssGrp, VPSS_CHN VpssChn, SAM
     stVpssChnAttr.enCompressMode               = pParam->enCompressMode[VpssChn];
     stVpssChnAttr.enDynamicRange               = pParam->enDynamicRange;
     stVpssChnAttr.enPixelFormat                = pParam->enPixelFormat;
-    if (stVpssChnAttr.u32Width * stVpssChnAttr.u32Height > 2688 * 1520 ) {
-        stVpssChnAttr.stFrameRate.s32SrcFrameRate  = 30;
-        stVpssChnAttr.stFrameRate.s32DstFrameRate  = 20;
-    } else {
-        stVpssChnAttr.stFrameRate.s32SrcFrameRate  = pParam->stFrameRate[VpssChn].s32SrcFrameRate;
-        stVpssChnAttr.stFrameRate.s32DstFrameRate  = pParam->stFrameRate[VpssChn].s32DstFrameRate;
-    }
+    stVpssChnAttr.stFrameRate.s32SrcFrameRate  = pParam->stFrameRate[VpssChn].s32SrcFrameRate;
+    stVpssChnAttr.stFrameRate.s32DstFrameRate  = pParam->stFrameRate[VpssChn].s32DstFrameRate;
     stVpssChnAttr.u32Depth                     = 0;
     stVpssChnAttr.bMirror                      = pParam->bMirror[VpssChn];
     stVpssChnAttr.bFlip                        = pParam->bFlip[VpssChn];
@@ -437,7 +554,7 @@ static HI_S32 SAMPLE_VENC_VPSS_ChnEnable(VPSS_GRP VpssGrp, VPSS_CHN VpssChn, SAM
         SAMPLE_PRT("HI_MPI_VPSS_SetChnAttr chan %d failed with %#x\n", VpssChn, s32Ret);
         goto exit0;
     }
-
+	
     if (bWrapEn)
     {
         if (VpssChn != 0)   //vpss limit! just vpss chan0 support wrap
@@ -445,7 +562,6 @@ static HI_S32 SAMPLE_VENC_VPSS_ChnEnable(VPSS_GRP VpssGrp, VPSS_CHN VpssChn, SAM
             SAMPLE_PRT("Error:Just vpss chan 0 support wrap! Current chan %d\n", VpssChn);
             goto exit0;
         }
-
 
         HI_U32 WrapBufLen = 0;
         VPSS_VENC_WRAP_PARAM_S WrapParam;
@@ -461,8 +577,6 @@ static HI_S32 SAMPLE_VENC_VPSS_ChnEnable(VPSS_GRP VpssGrp, VPSS_CHN VpssChn, SAM
 
         if (HI_MPI_SYS_GetVPSSVENCWrapBufferLine(&WrapParam, &WrapBufLen) == HI_SUCCESS)
         {
-            AdjustWrapBufLineBySnsType(pParam->enSnsType, &WrapBufLen);
-
             stVpssChnBufWrap.u32WrapBufferSize = VPSS_GetWrapBufferSize(WrapParam.stLargeStreamSize.u32Width,
                 WrapParam.stLargeStreamSize.u32Height, WrapBufLen, pParam->enPixelFormat, DATA_BITWIDTH_8,
                 COMPRESS_MODE_NONE, DEFAULT_ALIGN);
@@ -482,7 +596,6 @@ static HI_S32 SAMPLE_VENC_VPSS_ChnEnable(VPSS_GRP VpssGrp, VPSS_CHN VpssChn, SAM
                 pParam->stOutPutSize[pParam->BigStreamId].u32Width, pParam->stOutPutSize[pParam->BigStreamId].u32Height,
                 pParam->stOutPutSize[pParam->SmallStreamId].u32Width, pParam->stOutPutSize[pParam->SmallStreamId].u32Height);
         }
-
     }
 
     s32Ret = HI_MPI_VPSS_EnableChn(VpssGrp, VpssChn);
@@ -491,7 +604,6 @@ static HI_S32 SAMPLE_VENC_VPSS_ChnEnable(VPSS_GRP VpssGrp, VPSS_CHN VpssChn, SAM
         SAMPLE_PRT("HI_MPI_VPSS_EnableChn (%d) failed with %#x\n", VpssChn, s32Ret);
         goto exit0;
     }
-
 exit0:
     return s32Ret;
 }
@@ -511,7 +623,7 @@ static HI_S32 SAMPLE_VENC_VPSS_ChnDisable(VPSS_GRP VpssGrp, VPSS_CHN VpssChn)
     return s32Ret;
 }
 
-static HI_S32 SAMPLE_VENC_VPSS_Init(VPSS_GRP VpssGrp, SAMPLE_VPSS_CHN_ATTR_S *pstParam)
+static HI_S32 SAMPLE_VENC_VPSS_Init(VPSS_GRP VpssGrp, SAMPLE_VPSS_CHN_ATTR_S *pstParam, HI_BOOL bDisEn)
 {
     HI_S32 i,j;
     HI_S32 s32Ret;
@@ -522,7 +634,28 @@ static HI_S32 SAMPLE_VENC_VPSS_Init(VPSS_GRP VpssGrp, SAMPLE_VPSS_CHN_ATTR_S *ps
     {
         goto exit0;
     }
-
+	
+/*	VPSS_CROP_INFO_S stCropInfo;
+	stCropInfo.enCropCoordinate = VPSS_CROP_ABS_COOR;
+	stCropInfo.stCropRect.s32X = (2304-1920)/2;
+	stCropInfo.stCropRect.s32Y = (1296-1080)/2;		// emmmmm
+	stCropInfo.bEnable = HI_TRUE;
+	// if dis is enabled, cut 1296P -> 1080P here using VPSS & ISP DIS
+	if (HI_TRUE == bDisEn) {
+		stCropInfo.stCropRect.u32Width = 1920;
+		stCropInfo.stCropRect.u32Height = 1080;
+	} 
+	else if (HI_FALSE == bDisEn) {
+		printf("dis_d\n");
+		stCropInfo.stCropRect.u32Width = 2304;
+		stCropInfo.stCropRect.u32Height = 1296;
+	}
+	
+	s32Ret = HI_MPI_VPSS_SetGrpCrop(VpssGrp, &stCropInfo);
+	if(s32Ret != HI_SUCCESS) {	
+		SAMPLE_PRT("HI_MPI_VPSS_SetGrpCrop failed with %#x\n", s32Ret);
+	}
+*/	
     for (i = 0; i < VPSS_MAX_PHY_CHN_NUM; i++)
     {
         if (pstParam->bChnEnable[i] == HI_TRUE)
@@ -538,6 +671,7 @@ static HI_S32 SAMPLE_VENC_VPSS_Init(VPSS_GRP VpssGrp, SAMPLE_VPSS_CHN_ATTR_S *ps
     }
 
     i--; // for abnormal case 'exit1' prossess;
+
 
     s32Ret = SAMPLE_VENC_VPSS_StartGrp(VpssGrp);
     if (s32Ret != HI_SUCCESS)
@@ -664,94 +798,28 @@ static HI_VOID SAMPLE_VENC_GetCommVbAttr(const SAMPLE_SNS_TYPE_E enSnsType, cons
 
 }
 
-HI_S32 SAMPLE_VENC_CheckSensor(SAMPLE_SNS_TYPE_E   enSnsType,SIZE_S  stSize)
-{
-    HI_S32 s32Ret;
-    SIZE_S          stSnsSize;
-    PIC_SIZE_E      enSnsSize;
-
-    s32Ret = SAMPLE_COMM_VI_GetSizeBySensor(enSnsType, &enSnsSize);
-    if (HI_SUCCESS != s32Ret)
-    {
-        SAMPLE_PRT("SAMPLE_COMM_VI_GetSizeBySensor failed!\n");
-        return s32Ret;
-    }
-    s32Ret = SAMPLE_COMM_SYS_GetPicSize(enSnsSize, &stSnsSize);
-    if (HI_SUCCESS != s32Ret)
-    {
-        SAMPLE_PRT("SAMPLE_COMM_SYS_GetPicSize failed!\n");
-        return s32Ret;
-    }
-
-    if((stSnsSize.u32Width < stSize.u32Width) || (stSnsSize.u32Height < stSize.u32Height))
-    {
-        //SAMPLE_PRT("Sensor size is (%d,%d), but encode chnl is (%d,%d) !\n",
-            //stSnsSize.u32Width,stSnsSize.u32Height,stSize.u32Width,stSize.u32Height);
-        return HI_FAILURE;
-    }
-
-    return HI_SUCCESS;
-}
-
-HI_S32 SAMPLE_VENC_ModifyResolution(SAMPLE_SNS_TYPE_E enSnsType, PIC_SIZE_E *penSize, SIZE_S *pstSize)
-{
-    HI_S32 s32Ret;
-    SIZE_S          stSnsSize;
-    PIC_SIZE_E      enSnsSize;
-
-    s32Ret = SAMPLE_COMM_VI_GetSizeBySensor(enSnsType, &enSnsSize);
-    if (HI_SUCCESS != s32Ret)
-    {
-        SAMPLE_PRT("SAMPLE_COMM_VI_GetSizeBySensor failed!\n");
-        return s32Ret;
-    }
-    s32Ret = SAMPLE_COMM_SYS_GetPicSize(enSnsSize, &stSnsSize);
-    if (HI_SUCCESS != s32Ret)
-    {
-        SAMPLE_PRT("SAMPLE_COMM_SYS_GetPicSize failed!\n");
-        return s32Ret;
-    }
-
-    *penSize = enSnsSize;
-    pstSize->u32Width  = stSnsSize.u32Width;
-    pstSize->u32Height = stSnsSize.u32Height;
-
-    return HI_SUCCESS;
-}
-/******************************************************************************
-* function: H.265e + H264e@720P, H.265 Channel resolution adaptable with sensor
-******************************************************************************/
-HI_S32 SAMPLE_VENC_H265_H264(void)
+HI_S32 SAMPLE_VENC_H265_H264(YJSNPI_VENC_CONFIG_S *pconf)
 {
     HI_S32 i;
     HI_S32 s32Ret;
-    SIZE_S          stSize[2];
-    PIC_SIZE_E      enSize[2]     = {BIG_STREAM_SIZE, SMALL_STREAM_SIZE};
-    HI_S32          s32ChnNum     = 2;
-    VENC_CHN        VencChn[2]    = {0,1};
-    HI_U32          u32Profile[2] = {0,0};	// 0-base(264)/main(265), 1-main(264)/main10(265), 2-high(264),3-svc-t(264) 
-    PAYLOAD_TYPE_E  enPayLoad[2]  = {PT_H265, PT_H264};
-    VENC_GOP_MODE_E enGopMode[2]  = {VENC_GOPMODE_DUALP, VENC_GOPMODE_DUALP};
-    VENC_GOP_ATTR_S stGopAttr[2];	
-    SAMPLE_RC_E     enRcMode[2]   = {SAMPLE_RC_QVBR, SAMPLE_RC_CBR};	
+    HI_S32          s32ChnNum    	= 2;
+    VENC_CHN        VencChn[2]    	= {0,1};
     HI_BOOL         bRcnRefShareBuf = HI_TRUE;
 	VPSS_LOW_DELAY_INFO_S stLowDelayInfo;
-	//VPSS_CHN_MODE_S stVpssChnMode;
-	
+	SAMPLE_VI_CONFIG_S stViConfig;
     VI_DEV          ViDev        = 0;
     VI_PIPE         ViPipe       = 0;
     VI_CHN          ViChn        = 0;
-    SAMPLE_VI_CONFIG_S stViConfig;
-
     VPSS_GRP        VpssGrp        = 0;
     VPSS_CHN        VpssChn[2]     = {0,1};
     HI_BOOL         abChnEnable[VPSS_MAX_PHY_CHN_NUM] = {1,1,0};
     SAMPLE_VPSS_CHN_ATTR_S stParam;
     SAMPLE_VB_ATTR_S commVbAttr;
-
+	SIZE_S          stSize[2];
+	
 	// 由 PIC_SIZE_E 定义转换为 SIZE_S 数字
     for (i=0; i<s32ChnNum; i++) {
-        s32Ret = SAMPLE_COMM_SYS_GetPicSize(enSize[i], &stSize[i]);
+        s32Ret = SAMPLE_COMM_SYS_GetPicSize(pconf->res[i], &stSize[i]);
         if (HI_SUCCESS != s32Ret) {
             SAMPLE_PRT("SAMPLE_COMM_SYS_GetPicSize failed!\n");
             return s32Ret;
@@ -765,18 +833,16 @@ HI_S32 SAMPLE_VENC_H265_H264(void)
         return HI_FAILURE;
     }
 
-	// 检查 Sensor 是否支持设置的分辨率
-    s32Ret = SAMPLE_VENC_CheckSensor(stViConfig.astViInfo[0].stSnsInfo.enSnsType, stSize[0]);
-    if(s32Ret != HI_SUCCESS) {
-        s32Ret = SAMPLE_VENC_ModifyResolution(stViConfig.astViInfo[0].stSnsInfo.enSnsType,&enSize[0],&stSize[0]);
-        if(s32Ret != HI_SUCCESS) {
-            return HI_FAILURE;
-        }
-    }
+	// 检查 Sensor 是否支持设置的分辨率 // 不用检查了，你们不要乱写就行
 
 	// 搞一个默认的 VPSS 设置到 stParam 中
     SAMPLE_VENC_GetDefaultVpssAttr(stViConfig.astViInfo[0].stSnsInfo.enSnsType, abChnEnable, stSize, &stParam);
-
+	
+/*	// 如果开了防抖就改成VPSS离线 
+	// For 3516ev300, DIS only works with VPSS Offline
+	if (pconf->dis == HI_TRUE) {
+		stParam.ViVpssMode     = VI_ONLINE_VPSS_OFFLINE;	
+	}*/
     /******************************************
       step 1: init sys alloc common vb
     ******************************************/
@@ -795,7 +861,7 @@ HI_S32 SAMPLE_VENC_H265_H264(void)
     stViConfig.astViInfo[0].stDevInfo.ViDev     = ViDev;
     stViConfig.astViInfo[0].stPipeInfo.aPipe[0] = ViPipe;
     stViConfig.astViInfo[0].stChnInfo.ViChn     = ViChn;
-    stViConfig.astViInfo[0].stChnInfo.enDynamicRange = DYNAMIC_RANGE_SDR8;	// 只支持这个
+    stViConfig.astViInfo[0].stChnInfo.enDynamicRange = DYNAMIC_RANGE_SDR8;
     stViConfig.astViInfo[0].stChnInfo.enPixFormat    = PIXEL_FORMAT_YVU_SEMIPLANAR_420;
 
     s32Ret = SAMPLE_VENC_VI_Init(&stViConfig, stParam.ViVpssMode);
@@ -804,7 +870,7 @@ HI_S32 SAMPLE_VENC_H265_H264(void)
         return HI_FAILURE;
     }
 
-    s32Ret = SAMPLE_VENC_VPSS_Init(VpssGrp, &stParam);
+    s32Ret = SAMPLE_VENC_VPSS_Init(VpssGrp, &stParam, pconf->dis);
     if (HI_SUCCESS != s32Ret) {
         SAMPLE_PRT("Init VPSS err for %#x!\n", s32Ret);
         goto EXIT_VI_STOP;
@@ -815,6 +881,23 @@ HI_S32 SAMPLE_VENC_H265_H264(void)
         SAMPLE_PRT("VI Bind VPSS err for %#x!\n", s32Ret);
         goto EXIT_VPSS_STOP;
     }
+	
+	// 2轴消抖 效果几乎没有……并且必须让VPSS为离线模式
+	// 虽然内存是够的 但有待测试一下是否会增加延迟
+
+	// 算了 效果实在是没有
+	
+	/*
+	if (pconf->dis == HI_TRUE) {
+		ISP_DIS_ATTR_S stDisAttr;
+		stDisAttr.bEnable = HI_TRUE;
+		s32Ret = HI_MPI_ISP_SetDISAttr(0, &stDisAttr);
+		if (s32Ret != HI_SUCCESS) {
+			SAMPLE_PRT("HI_MPI_ISP_SetDISAttr failed with %#x\n", s32Ret);
+			return HI_FAILURE;
+		}
+	}
+	*/
 
    /******************************************
     start stream venc
@@ -822,43 +905,32 @@ HI_S32 SAMPLE_VENC_H265_H264(void)
 	// 设置两个通道的码率控制方式和帧预测方式
 	// 通道0要存储，通道1用于回传
 
-    s32Ret = SAMPLE_COMM_VENC_GetGopAttr(enGopMode[0], &stGopAttr[0]);
-    if (HI_SUCCESS != s32Ret) {
-        SAMPLE_PRT("Venc Get GopAttr 0 for %#x!\n", s32Ret);
-        goto EXIT_VI_VPSS_UNBIND;
-    }
-	s32Ret = SAMPLE_COMM_VENC_GetGopAttr(enGopMode[1], &stGopAttr[1]);
-    if (HI_SUCCESS != s32Ret) {
-        SAMPLE_PRT("Venc Get GopAttr 1 for %#x!\n", s32Ret);
-        goto EXIT_VI_VPSS_UNBIND;
-    }
-
-   /***encode h.265 **/
-    s32Ret = SAMPLE_COMM_VENC_Start(VencChn[0], enPayLoad[0], enSize[0], enRcMode[0], 
-									u32Profile[0],bRcnRefShareBuf, &stGopAttr[0]);
+   /***encode ch0 **/
+	s32Ret = SAMPLE_COMM_YJSNPIVENC_Start(VencChn[0], 0, pconf, bRcnRefShareBuf);
     if (HI_SUCCESS != s32Ret) {
         SAMPLE_PRT("Venc Chn 0 Start failed for %#x!\n", s32Ret);
         goto EXIT_VI_VPSS_UNBIND;
     }
 
-    s32Ret = SAMPLE_COMM_VPSS_Bind_VENC(VpssGrp, VpssChn[0],VencChn[0]);
+    s32Ret = SAMPLE_COMM_VPSS_Bind_VENC(VpssGrp, VpssChn[0], VencChn[0]);
     if (HI_SUCCESS != s32Ret) {
         SAMPLE_PRT("Venc Chn 0 bind Vpss failed for %#x!\n", s32Ret);
         goto EXIT_VENC_H265_STOP;
     }
 
-    /***encode h.264 **/
-    s32Ret = SAMPLE_COMM_VENC_Start(VencChn[1], enPayLoad[1], enSize[1], enRcMode[1], 
-									u32Profile[1], bRcnRefShareBuf, &stGopAttr[1]);
+    /***encode ch1 **/
+	s32Ret = SAMPLE_COMM_YJSNPIVENC_Start(VencChn[1], 1, pconf, bRcnRefShareBuf);
+	
     if (HI_SUCCESS != s32Ret) {
         SAMPLE_PRT("Venc Chn 1 Start failed for %#x!\n", s32Ret);
         goto EXIT_VENC_H265_UnBind;
     }
-    s32Ret = SAMPLE_COMM_VPSS_Bind_VENC(VpssGrp, VpssChn[1],VencChn[1]);
+    s32Ret = SAMPLE_COMM_VPSS_Bind_VENC(VpssGrp, VpssChn[1], VencChn[1]);
     if (HI_SUCCESS != s32Ret) {
         SAMPLE_PRT("Venc Chn 1 bind Vpss failed for %#x!\n", s32Ret);
         goto EXIT_VENC_H264_STOP;
     }
+
 	// 开启通道1的低延迟模式
 	s32Ret = HI_MPI_VPSS_GetLowDelayAttr(VpssGrp, VpssChn[1] ,&stLowDelayInfo);
 	if (HI_SUCCESS != s32Ret) {
@@ -876,7 +948,7 @@ HI_S32 SAMPLE_VENC_H265_H264(void)
     /******************************************
      stream save process
     ******************************************/
-    s32Ret = SAMPLE_COMM_VENC_StartGetStream(VencChn, s32ChnNum);
+    s32Ret = SAMPLE_COMM_YJSNPIVENC_StartGetStream(VencChn, s32ChnNum, pconf);
     if (HI_SUCCESS != s32Ret)
     {
         SAMPLE_PRT("Start Venc failed!\n");
@@ -911,8 +983,6 @@ EXIT_VI_STOP:
     return s32Ret;
 }
 
-
-
 /******************************************************************************
 * function    : main()
 * Description : video venc 
@@ -921,23 +991,43 @@ EXIT_VI_STOP:
 int main (int argc, char *argv[])
 {
     HI_S32 s32Ret;
-
+	YJSNPI_VENC_CONFIG_S conf;
+	dictionary * ini;
+	char *ini_file;
+	
     printf("============================================================================\n");
-    printf("YJSNPI-Hi Video Encoder @ Hi3516EV300 + IMX335 \n");
-    printf("Get 1296P_30fps_8Mbps_H.265e_QVBR_main + 360P_30fps_512kbps_H.264e_CBR_base \n");
+    printf("YJSNPI-Hi Video Encoder \n");
     printf("============================================================================\n");
-
+	
+	// set signal handler
     signal(SIGINT, SAMPLE_VENC_HandleSig);
     signal(SIGTERM, SAMPLE_VENC_HandleSig);
-
-	s32Ret = SAMPLE_VENC_H265_H264();
-
+	
+	// get config from ini
+	ini_file = argv[1];
+	ini = iniparser_load(ini_file);
+	if (!ini) {
+		fprintf(stderr,"main: iniparser_load: failed.\n");
+		exit(1);
+	}
+	s32Ret = SAMPLE_YJSNPI_GetConfigFromIni(&conf, ini);
+	iniparser_freedict(ini);
+	if (HI_FAILURE == s32Ret) {
+		printf("main: SAMPLE_YJSNPI_GetConfigFromIni failed.\n");
+		exit(s32Ret);
+	}
+	
+	// run
+	s32Ret = SAMPLE_VENC_H265_H264(&conf);
+	
+	// exit
     if (HI_SUCCESS == s32Ret) { 
 		printf("program exit normally!\n"); 
 	} else { 
 		printf("program exit abnormally!\n"); 
 	}
-
+	
+	
     exit(s32Ret);
 }
 
