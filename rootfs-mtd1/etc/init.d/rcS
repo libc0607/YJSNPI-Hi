@@ -1,0 +1,142 @@
+#! /bin/sh
+
+fun_init()
+{
+	mount /dev/mtdblock2 /usr
+	mount /dev/mtdblock3 /mnt/web
+	mount /dev/mtdblock4 /mnt/custom
+	mount -t jffs2 /dev/mtdblock5 /mnt/mtd
+	
+	if [ $? -ne 0 ];then
+		echo "Clean up the old data in the 'mtd' partition."
+		/sbin/flash_eraseall -j -q /dev/mtd5 
+		mount -t jffs2 /dev/mtdblock5 /mnt/mtd
+	fi
+
+	mount -t ramfs  /dev/mem  /var/
+	mkdir -p /var/tmp
+	mount -t ramfs /dev/mem2 /utils/
+	mount -t usbfs usbfs /proc/bus/usb/
+		
+	########General HIKPROTOCOL
+	[ -d /mnt/web/share/fonts/ ] && \
+	mount /mnt/web/share/fonts /mnt/custom/data/Fonts
+	[ -d /usr/share/fonts/ ] && \		
+	mount /usr/share/fonts /mnt/custom/data/Fonts
+
+	mkdir /dev/net
+	mknod /dev/net/tun c 10 200
+
+	mkdir -p /mnt/mtd/Config /mnt/mtd/Log /mnt/mtd/Config/ppp /mnt/mtd/Config/Json
+
+	ulimit -s 4096
+
+	/sbin/ifconfig eth0 hw ether `sed -n "s/ethaddr:\(.*\).*/\1\n/p" /proc/xm/xminfo`
+}
+
+
+
+#############################################################
+
+. /etc/init.d/dnode
+
+mkdir -p /dev/.udev
+
+/bin/echo /sbin/mdev > /proc/sys/kernel/hotplug
+/sbin/mdev -s
+
+fun_init
+
+echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+
+# Added by YJSNPI
+# eth up
+/sbin/ifconfig eth0 up
+/sbin/ifconfig eth0 txqueuelen 10	# is it necessary?
+/sbin/ifconfig lo up
+
+# open telnet 
+/bin/busybox telnetd &
+# turn off watchdog (hi3516ev200/300)
+devmem 0x12030c00 32 0x1ACCE551
+devmem 0x12030008 32 0
+
+# Moded by YJSNPI
+# Try to mount mmcblk0p1, not mmcblk0
+mkdir -p /var/tmp/mmcblock0
+mkdir -p /var/tmp/mmcblock0p1
+mkdir -p /var/tmp/nfs
+mkdir -p /mnt/mtd/yjsnpi	# save config 
+mount /dev/mmcblk0p1 /var/tmp/mmcblock0p1
+mount /dev/mmcblk0   /var/tmp/mmcblock0		
+
+# check if /dev/mmcblk0* mount success
+/bin/df -h | grep /dev/mmcblk0 2>&1 >/dev/null
+if [ $? -ne 0 ]; then
+	# mount failed, exit script
+	exit
+fi
+MOUNT_DIR=`/bin/df -h|grep /dev/mmcblk|head -n 1|awk {'print $6'}`
+MOUNT_DEV=`/bin/df -h|grep /dev/mmcblk|head -n 1|awk {'print $1'}`
+# mount to /tf (for video saving)
+/bin/mount $MOUNT_DEV /tf
+# link tf to /var/tmp/www
+mkdir -p /var/tmp/www
+/bin/ln -s /tf /var/tmp/www
+# start static file server
+[ -f /usr/bin/fileserver ] && /usr/sbin/run_loop /usr/bin/fileserver &
+
+# find venc config file and save
+if [ -f $MOUNT_DIR/venc.ini ];then
+	[ -f /mnt/mtd/yjsnpi/venc.ini ] && rm /mnt/mtd/yjsnpi/venc.ini
+	cp $MOUNT_DIR/venc.ini /mnt/mtd/yjsnpi/venc.ini
+	dos2unix -u /mnt/mtd/yjsnpi/venc.ini
+	rm $MOUNT_DIR/venc.ini
+	sync
+fi
+
+# find ethernet config file and save
+if [ -f $MOUNT_DIR/eth.ip ];then
+	[ -f /mnt/mtd/yjsnpi/eth.ip ] && . rm /mnt/mtd/yjsnpi/eth.ip
+	cp $MOUNT_DIR/eth.ip /mnt/mtd/yjsnpi/eth.ip
+	dos2unix -u /mnt/mtd/yjsnpi/eth.ip
+	rm $MOUNT_DIR/eth.ip
+	sync
+fi
+if [ -f /mnt/mtd/yjsnpi/eth.ip ];then
+	/sbin/ifconfig eth0 $(cat /mnt/mtd/yjsnpi/eth.ip)
+else
+	/sbin/ifconfig eth0 192.168.1.10
+fi
+/sbin/ip route add default dev eth0	# ...
+
+echo "===============================================================" 	>> $MOUNT_DIR/yjsnpi-venc.log
+echo "===============================================================" 	>> $MOUNT_DIR/yjsnpi-venc.log
+echo "                     YJSNPI VENC start"				>> $MOUNT_DIR/yjsnpi-venc.log
+echo "venc.ini:"							>> $MOUNT_DIR/yjsnpi-venc.log
+cat /mnt/mtd/yjsnpi/venc.ini 						>> $MOUNT_DIR/yjsnpi-venc.log
+echo "ipaddr:"								>> $MOUNT_DIR/yjsnpi-venc.log
+cat /mnt/mtd/yjsnpi/eth.ip 						>> $MOUNT_DIR/yjsnpi-venc.log
+echo "===============================================================" 	>> $MOUNT_DIR/yjsnpi-venc.log
+echo "===============================================================" 	>> $MOUNT_DIR/yjsnpi-venc.log
+
+# load kernel modules
+OS_MEM=`sed  "s/.* mem=\([0-9]\{1,\}\)M .*/\1/" /proc/cmdline`
+cd /usr/lib/modules
+./load3516ev300 -i -sensor imx335 -osmem $OS_MEM 
+cd -
+# start yjsnpi-venc
+if [ ! -f $MOUNT_DIR/stop_autorun ] && [ -f /mnt/mtd/yjsnpi/venc.ini ] ; then
+	/usr/sbin/run_loop "/usr/bin/yjsnpi-venc /mnt/mtd/yjsnpi/venc.ini 1>>$MOUNT_DIR/yjsnpi-venc.log 2>&1" >/dev/null &
+fi
+
+# run custom script
+if [ -f $MOUNT_DIR/run_custom ] ; then
+	chmod +x $MOUNT_DIR/autorun.sh
+	$MOUNT_DIR/autorun.sh &
+fi
+
+
+
+
+# ?
