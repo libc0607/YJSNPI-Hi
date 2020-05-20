@@ -31,6 +31,13 @@ extern "C" {
 
 #define VB_MAX_NUM            10
 
+// Note: not all hi3516ev200/300 boards support RTC
+// so the filename based on timestamp may cause video lost
+// (e.g. all video files are 0003.h265)
+// use a counter file to solve this issue temporarily
+// but this file should exist
+#define VIDEO_COUNTER_FILE "/mnt/mtd/yjsnpi/video_counter"
+
 
 typedef struct hiSAMPLE_VPSS_ATTR_S
 {
@@ -79,7 +86,7 @@ HI_S32 SAMPLE_YJSNPI_GetConfigFromIni(YJSNPI_VENC_CONFIG_S *pconf, dictionary * 
 	char buf[128];
 	char * str;
 	HI_S32 tmp;
-	struct timeval stamp;
+	//struct timeval stamp;
 	
 	// clear
 	memset(pconf, 0, sizeof(YJSNPI_VENC_CONFIG_S));
@@ -103,8 +110,16 @@ HI_S32 SAMPLE_YJSNPI_GetConfigFromIni(YJSNPI_VENC_CONFIG_S *pconf, dictionary * 
 	} 
 
 	// ch0 res
-	// 不用改了 反正低了也不增加帧率……就默认让它最大
-	pconf->res[0] = PIC_2304x1296;
+	tmp = iniparser_getint(ini, "venc:ch0_res", 0);
+	if (tmp == 1296) {
+		pconf->res[0] = PIC_2304x1296;
+	}
+	else if (tmp == 1080) {
+		pconf->res[0] = PIC_1080P;
+	}
+	else {
+		pconf->res[0] = PIC_2304x1296; 	// for default now
+	}
 	
 	// ch0 rc
 	// note that SAMPLE_RC_E[0]=CBR so default is CBR 
@@ -131,12 +146,43 @@ HI_S32 SAMPLE_YJSNPI_GetConfigFromIni(YJSNPI_VENC_CONFIG_S *pconf, dictionary * 
 		printf("YJSNPI VENC config: Warning: ch0_gop not set. Use default NORMAL\n");
 		pconf->gop[0] = VENC_GOPMODE_NORMALP;
 	}
-	// ch0 savedir (by timestamp)
+	// ch0 savedir (by counter file)
 	// example: 
 	// ch0_savedir=/var/tmp/mmcblock0/save
-	// dest. video: /var/tmp/mmcblock0/save/0123456789.h26x
+	// VIDEO_COUNTER_FILE: 20
+	// dest. video: /var/tmp/mmcblock0/save/0000000020.h26x
+	FILE *fp_ctr = fopen(VIDEO_COUNTER_FILE, "r");
+	int file_ctr = 0;
+	if (fp_ctr == NULL || (fscanf(fp_ctr, "%d", &file_ctr) != 1)) {
+		printf("YJSNPI VENC config: Info: default ctr file %s not found/valid, create new one\n", VIDEO_COUNTER_FILE);
+		if (fp_ctr != NULL) {
+			fclose(fp_ctr);
+		}
+		fp_ctr = fopen(VIDEO_COUNTER_FILE, "w");
+		if (fp_ctr == NULL) {
+			printf("YJSNPI VENC config: Error: cannot create %s - read-only filesystem? Your video may lost, stop here \n", VIDEO_COUNTER_FILE);
+			return HI_FAILURE;
+		}
+		fprintf(fp_ctr, "%d", 0);
+		printf("YJSNPI VENC config: Info: new ctr file created\n");
+		fclose(fp_ctr);
+		file_ctr = 0;
+	} else {
+		// ctr++
+		printf("YJSNPI VENC config: Info: old file ctr %d, new %d\n", file_ctr, file_ctr+1);
+		file_ctr = file_ctr+1;
+		fclose(fp_ctr);
+		fp_ctr = fopen(VIDEO_COUNTER_FILE, "w");
+		if (fp_ctr != NULL) {
+			fprintf(fp_ctr, "%d", file_ctr);
+			fclose(fp_ctr);
+		} else {
+			printf("YJSNPI VENC config: Error: cannot create %s - read-only filesystem? Your video may lost, stop here \n", VIDEO_COUNTER_FILE);
+			return HI_FAILURE;
+		}
+		
+	}
 	memset(buf, 0, sizeof(buf));
-	gettimeofday(&stamp, NULL);
 	str = (char *)iniparser_getstring(ini, "venc:ch0_savedir", NULL);
 	if (strlen(str) > 100) {
 		printf("YJSNPI VENC config: Error: ch0_savedir tooooooo long.\n");
@@ -144,7 +190,7 @@ HI_S32 SAMPLE_YJSNPI_GetConfigFromIni(YJSNPI_VENC_CONFIG_S *pconf, dictionary * 
 	}
 	strncpy(buf, str, strlen(str));
 	buf[strlen(str)] = '/';	// add seperate
-	snprintf(buf+strlen(str)+1, 11, "%010ld", stamp.tv_sec);
+	snprintf(buf+strlen(str)+1, 11, "%010d", file_ctr);
 	if (pconf->enc[0] == PT_H264) {
 		strncpy(buf+strlen(str)+11, ".h264", 5);
 	} else if (pconf->enc[0] == PT_H265) {
@@ -955,9 +1001,13 @@ HI_S32 SAMPLE_VENC_H265_H264(YJSNPI_VENC_CONFIG_S *pconf)
         goto EXIT_VENC_H264_UnBind;
     }
 
-    printf("please press twice ENTER to exit this sample\n");
-    getchar();
-    getchar();
+    printf("stream & save thread have started \n");
+    printf("main thread is sunbathing at rooftop ..\n");
+	for (;;) {
+		sleep(3);
+		// to-do: check program status, send status via udp & feed the dog 
+	}
+
 
     /******************************************
      exit process
