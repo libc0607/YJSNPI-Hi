@@ -83,8 +83,15 @@ MOUNT_DEV=`/bin/df -h|grep /dev/mmcblk|head -n 1|awk {'print $1'}`
 # link tf to /var/tmp/www
 mkdir -p /var/tmp/www
 /bin/ln -s /tf /var/tmp/www
+
 # start static file server
-[ -f /usr/bin/fileserver ] && /usr/sbin/run_loop /usr/bin/fileserver &
+# A: using golang fileserver:
+#[ -f /usr/bin/fileserver ] && /usr/sbin/run_loop /usr/bin/fileserver &
+# B: using busybox fileserver: (lower memory & flash use, thx to https://github.com/HeGanjie/busybox-httpd-directory-listing)
+mkdir -p /var/tmp/www/cgi-bin
+[ -f /usr/bin/busybox-fileserver/index.html ] && ln -s /usr/bin/busybox-fileserver/index.html /var/tmp/www/index.html
+[ -f /usr/bin/busybox-fileserver/main.cgi ] && ln -s /usr/bin/busybox-fileserver/main.cgi /var/tmp/www/cgi-bin/main.cgi
+[ -f /usr/sbin/httpd ] && /usr/sbin/httpd -h /var/tmp/www
 
 # find venc config file and save
 if [ -f $MOUNT_DIR/venc.ini ];then
