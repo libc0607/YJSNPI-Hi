@@ -82,7 +82,9 @@ root/xmhdipc
 ```
 "socat UDP-LISTEN:xxxxx - | tx_rawsock -blablabla ..."  
 ```  
-并将 venc.ini 中 CH1 的编码方式改为 264 （265如果之后支持了也能用  
+将 venc.ini 中 CH1 的编码方式改为 264 （265 如果之后支持了也能用   
+通过任何方式将天空端与摄像头通过网络连接起来，并可以相互 ping 通   
+即可  
 
 ### 在电脑上先看看视频流？
 安装 gstreamer，   
