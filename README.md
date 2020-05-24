@@ -3,8 +3,8 @@
 
 ### 硬件
 暂时支持两款：  
-雄迈 IVG-85HF20PYA-S 模组 （海思 Hi3516EV200 + 大法 IMX307）  
-雄迈 IVG-85HG50PYA-S 模组 （海思 Hi3516EV300 + 大法 IMX335）  
+雄迈 IVG-85HF20PYA-S 模组 （海思 Hi3516EV200 + 大法 IMX307） 支持 1920x1080@30fps 录像 + 640x360@30fps 网络输出  
+雄迈 IVG-85HG50PYA-S 模组 （海思 Hi3516EV300 + 大法 IMX335） 支持 2304x1296@30fps 录像 + 720x576@30fps 网络输出  
 加焊一个 16P 插头，接个 TF 卡扩展板，一般同一家淘宝店都有卖的  
 
 ### 刷机（Windows 下）
@@ -95,3 +95,8 @@ gst-launch-1.0.exe udpsrc port=5000 ! h265parse ! avdec_h265 ! autovideosink syn
 # H.264
 gst-launch-1.0.exe udpsrc port=5000 ! h264parse ! avdec_h264 ! autovideosink sync=false
 ```
+
+### 其他 
+本固件是在雄迈原厂固件上直接修改而来，修改部分都有开源  
+分享此教程时请按照 CC BY-NC-SA 3.0  
+用到的海思 SDK 可以在 [这个 Telegram Channel](https://t.me/hi3516) 下载  
