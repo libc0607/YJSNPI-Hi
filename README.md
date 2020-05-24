@@ -1,5 +1,6 @@
 # YJSNPI-Hi
 关于把基于海思芯片的 IPC 模组用在飞机上录像并顺便输出一路码流给数字图传的事  
+本项目为 [YJSNPI-Broadcast](https://github.com/libc0607/YJSNPI-Broadcast) 填坑过程中的副产物，但由于单独用也能用就另开了个 repo
 
 ### 硬件
 暂时支持两款：  
@@ -125,6 +126,9 @@ gst-launch-1.0.exe udpsrc port=5000 ! h265parse ! avdec_h265 ! autovideosink syn
 # H.264
 gst-launch-1.0.exe udpsrc port=5000 ! h264parse ! avdec_h264 ! autovideosink sync=false
 ```
+
+### 淘宝买到的扩展板怎么画了个天线并联？？
+嫌丑的话可以参考我在 OSHWHUB 的 [这个项目](https://oshwhub.com/libc0607/xm-ext-board-fpv) 自己画一个  
 
 ### 其他 
 本固件是在雄迈原厂固件上直接修改而来，修改部分都有开源  
