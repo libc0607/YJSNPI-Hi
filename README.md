@@ -33,6 +33,7 @@
 
 ### 刷机（Windows 下）
 连接好串口线和网线，将电脑的 IP 设置为 192.168.1.107  
+下载 image/ 目录下对应型号的固件  
 在放固件的目录下运行 [tftpd32](https://tftpd32.jounin.net/)  
 
 在串口终端里不停按 Ctrl+C，上电，中断进入U-Boot  
@@ -50,6 +51,7 @@ sf probe 0;sf lock 0;sf erase 0x40000 0x740000;sf write 0x42000000 0x40000 0x740
 reset
 
 ```
+注：这里改动了原厂分区，因为那个分区方式太麻烦了。。。  
 ![bootargs](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/bootargs.png)  
 ![tftp](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/flash-tftp.png)  
 ![erase](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/flash-erase.png)  
@@ -60,8 +62,16 @@ reset
 TF 卡根目录中放入如下文件并按照需求修改：  
 
 venc.ini:  
-这个文件用于设置视频编码及输出；不存在文件的话开机会不启动  
-帧率都是 30fps，没法设置，因为这芯片的视频输入就只能到这么高  
+这个文件用于设置视频编码及输出；  
+如果刚刷完机，在内部存储和tf卡中都不存在文件的话，开机就不启动录像；tf卡根目录中有此文件则更新至内部存储；tf卡中没有但内部有保存则使用内部    
+
+帧率：都是 30fps，没法设置，因为这芯片的视频输入就只能到这么高，对于玩飞机已经够低了   
+chX_rc：码率控制，只有第一个 CBR 是恒定码率，由于数字图传空中传输的特性最好在 CH1 设置成这个模式；CH0可以设置为其他模式节约一点点空间    
+chX_gop：P帧参考啥啥啥，海思文档推荐在运动场景下用dualp    
+ch0_res：写死了一些参数，这里ev200写死1080，ev300写死1296即可     
+ch1_res：这里3516ev200最高只能设置到360P，原因是按照原厂参数来算，再大的话预留给编码的内存就不足了（你也可以改uboot中的osmem参数）  
+ch0_savedir 保存位置：开机后会自动挂载tf卡的第一个分区到 /tf，如果像下面这样写就是保存到卡的根目录     
+
 ```
 [venc]
 
