@@ -4,7 +4,9 @@
 ### 硬件
 暂时支持两款：  
 雄迈 IVG-85HF20PYA-S 模组 （海思 Hi3516EV200 + 大法 IMX307） 支持 1920x1080@30fps 录像 + 640x360@30fps 网络输出  
+![307](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/307.png)  
 雄迈 IVG-85HG50PYA-S 模组 （海思 Hi3516EV300 + 大法 IMX335） 支持 2304x1296@30fps 录像 + 720x576@30fps 网络输出  
+![335](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/335.png)  
 
 购买时建议配好镜头；不玩夜航的话光圈 F2.0 足够了，镜头焦距越小视角越大畸变越大  
 也可以买变焦镜头，但这还只是另一个咕咕咕着的坑  
@@ -17,6 +19,16 @@
 5. 雄迈模组用的尾线，同一家店会有卖的+1  
 6. M2 铜柱、螺丝、螺母若干  
 网线、电脑、串口模块、读卡器啥的默认有  
+
+焊接及连接方法看图：  
+![fpc1](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/fpc-conn.png)  
+![fpc2](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/fpc-conn-finish.png)  
+![fpc3](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/fpc-connect.png)  
+![uart1](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/uart-conn.png)  
+![uart2](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/uart-conn-finish.png)  
+![eth1](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/eth-power-conn.png)  
+![conn](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/conn-1.png)  
+
 
 ### 刷机（Windows 下）
 连接好串口线和网线，将电脑的 IP 设置为 192.168.1.107  
@@ -37,6 +49,9 @@ sf probe 0;sf lock 0;sf erase 0x40000 0x740000;sf write 0x42000000 0x40000 0x740
 reset
 
 ```
+![bootargs](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/bootargs.png)  
+![tftp](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/flash-tftp.png)  
+![erase](https://github.com/libc0607/YJSNPI-Hi/raw/master/pics/flash-erase.png)  
 对于 雄迈 IVG-85HG50PYA-S 模组 （海思 Hi3516EV300 + 大法 IMX335），咕咕咕  
 
 ### 设置文件
