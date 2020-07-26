@@ -162,6 +162,7 @@ typedef enum hiSAMPLE_SNS_TYPE_E
     SONY_IMX307_MIPI_2M_30FPS_12BIT_WDR2TO1,
     SONY_IMX307_2L_MIPI_2M_30FPS_12BIT,
     SONY_IMX307_2L_MIPI_2M_30FPS_12BIT_WDR2TO1,
+    SONY_IMX307_2L_MIPI_1M_60FPS_12BIT,
     SONY_IMX335_MIPI_5M_30FPS_12BIT,
     SONY_IMX335_MIPI_5M_30FPS_10BIT_WDR2TO1,
     SONY_IMX335_MIPI_4M_30FPS_12BIT,
@@ -203,14 +204,18 @@ typedef struct hiYJSNPI_VENC_CONFIG_S
     PIC_SIZE_E			res[2]; 	// resolution 
 	PAYLOAD_TYPE_E  	enc[2];		// enc. type
 	SAMPLE_RC_E     	rc[2];		// rate control
-	HI_U32				kbps[2];	// bitrate
+	HI_U32			kbps[2];	// bitrate
 	VENC_GOP_MODE_E 	gop[2];		// gop mode
-	HI_BOOL				dis;		// dis en
-	char  				save[128];	// ch0 save file name
-	HI_S16				lport;		// udp listen port
-	HI_S16				dport;		// udp dest. port
-	char 				daddr[16];	// udp dest. addr (char)
+	HI_BOOL			dis;		// dis en
+	char  			save[128];	// ch0 save file name
+	HI_S16			lport;		// udp listen port
+	HI_S16			dport;		// udp dest. port
+	char 			daddr[16];	// udp dest. addr (char)
 	HI_U32          	profile[2];	// encode profile
+	HI_BOOL			awb_strength_custom;
+	HI_U8			awb_strength_r;
+	HI_U8			awb_strength_b;
+	HI_U16			awb_speed;
     
 } YJSNPI_VENC_CONFIG_S;
 
