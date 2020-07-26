@@ -71,6 +71,7 @@ chX_gop：P帧参考啥啥啥，海思文档推荐在运动场景下用dualp
 ch0_res：写死了一些参数，这里ev200写死1080，ev300写死1296即可     
 ch1_res：这里3516ev200最高只能设置到360P，原因是按照原厂参数来算，再大的话预留给编码的内存就不足了（你也可以改uboot中的osmem参数）  
 ch0_savedir 保存位置：开机后会自动挂载tf卡的第一个分区到 /tf，如果像下面这样写就是保存到卡的根目录     
+awb_speed_custom 和 awb_speed： 影响不同光源色温的场景间转换时自动白平衡收敛的速度，比如从室内飞到室外的时候  
 
 ```
 [venc]
@@ -92,6 +93,9 @@ ch1_gop=1           # 0-normal,1-dualp,2-smartp
 ch1_udp_bind_port=20000         # bind port 
 ch1_udp_send_ip=192.168.1.107   # send udp stream to <ch1_udp_send_ip>:<ch1_udp_send_port>
 ch1_udp_send_port=5000
+
+awb_speed_custom=1  # 0-disable, 1-enable
+awb_speed=2048      # 0~4095
 
 ```
 
