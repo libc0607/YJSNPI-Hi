@@ -4,7 +4,7 @@
   Author        : libc0607
   Created       : 2020
   Description   : 
-  Usage: ./yjsnpi-venc conf.ini /var/tmp/mmcblock0
+  Usage: ./yjsnpi-venc conf.ini 
 ******************************************************************************/
 
 #ifdef __cplusplus
@@ -73,7 +73,7 @@ typedef struct hiSAMPLE_VB_ATTR_S
 void SAMPLE_VENC_Usage(char* sPrgNm)
 {
     printf("Usage : %s \n", sPrgNm);
-	printf("./yjsnpi-venc conf.ini /var/tmp/mmcblock0\n");
+	printf("./yjsnpi-venc conf.ini\n");
     return;
 }
 
@@ -94,6 +94,15 @@ HI_S32 SAMPLE_YJSNPI_GetConfigFromIni(YJSNPI_VENC_CONFIG_S *pconf, dictionary * 
 	// global
 	// 2轴dis 曾经想开 开了发现效果贼差 
 	pconf->dis = HI_FALSE;
+	
+	// awb强度
+	pconf->awb_strength_custom = (iniparser_getint(ini, "venc:awb_speed_custom", 0) == 1)? HI_TRUE: HI_FALSE;
+	if (pconf->awb_strength_custom == HI_TRUE) {
+		//pconf->awb_strength_r = iniparser_getint(ini, "venc:awb_strength_r", 0);
+		//pconf->awb_strength_b = iniparser_getint(ini, "venc:awb_strength_b", 0);
+		pconf->awb_speed = iniparser_getint(ini, "venc:awb_speed", 0);
+	}
+	
 	
 	// ch0 
 	// ch0 enc
@@ -116,6 +125,9 @@ HI_S32 SAMPLE_YJSNPI_GetConfigFromIni(YJSNPI_VENC_CONFIG_S *pconf, dictionary * 
 	}
 	else if (tmp == 1080) {
 		pconf->res[0] = PIC_1080P;
+	}
+	else if (tmp == 720) {
+		pconf->res[0] = PIC_720P;
 	}
 	else {
 		pconf->res[0] = PIC_2304x1296; 	// for default now
@@ -323,6 +335,9 @@ static HI_U32 GetFullLinesStdFromSensorType(SAMPLE_SNS_TYPE_E enSnsType)
         case SONY_IMX307_2L_MIPI_2M_30FPS_12BIT_WDR2TO1:
             FullLinesStd = 1125;
             break;
+        case SONY_IMX307_2L_MIPI_1M_60FPS_12BIT:
+			FullLinesStd = 750;
+            break;
         case SONY_IMX335_MIPI_5M_30FPS_12BIT:
         case SONY_IMX335_MIPI_5M_30FPS_10BIT_WDR2TO1:
             FullLinesStd = 1875;
@@ -375,7 +390,6 @@ static HI_VOID SAMPLE_VENC_GetDefaultVpssAttr(SAMPLE_SNS_TYPE_E enSnsType, HI_BO
     pVpssAttr->bWrapEn        = 0;
     pVpssAttr->enSnsType      = enSnsType;
     pVpssAttr->ViVpssMode     = VI_ONLINE_VPSS_ONLINE;
-    //pVpssAttr->ViVpssMode     = VI_ONLINE_VPSS_OFFLINE;
     
     for (i = 0; i < VPSS_MAX_PHY_CHN_NUM; i++)
     {
@@ -478,7 +492,7 @@ HI_S32 SAMPLE_VENC_VI_Init( SAMPLE_VI_CONFIG_S *pstViConfig, VI_VPSS_MODE_E ViVp
         SAMPLE_PRT("HI_MPI_ISP_GetCtrlParam failed with %d!\n", s32Ret);
         return s32Ret;
     }
-    stIspCtrlParam.u32StatIntvl  = u32FrameRate/30;
+    stIspCtrlParam.u32StatIntvl  = u32FrameRate/60;
     if (stIspCtrlParam.u32StatIntvl == 0)
     {
         stIspCtrlParam.u32StatIntvl = 1;
@@ -680,28 +694,7 @@ static HI_S32 SAMPLE_VENC_VPSS_Init(VPSS_GRP VpssGrp, SAMPLE_VPSS_CHN_ATTR_S *ps
     {
         goto exit0;
     }
-	
-/*	VPSS_CROP_INFO_S stCropInfo;
-	stCropInfo.enCropCoordinate = VPSS_CROP_ABS_COOR;
-	stCropInfo.stCropRect.s32X = (2304-1920)/2;
-	stCropInfo.stCropRect.s32Y = (1296-1080)/2;		// emmmmm
-	stCropInfo.bEnable = HI_TRUE;
-	// if dis is enabled, cut 1296P -> 1080P here using VPSS & ISP DIS
-	if (HI_TRUE == bDisEn) {
-		stCropInfo.stCropRect.u32Width = 1920;
-		stCropInfo.stCropRect.u32Height = 1080;
-	} 
-	else if (HI_FALSE == bDisEn) {
-		printf("dis_d\n");
-		stCropInfo.stCropRect.u32Width = 2304;
-		stCropInfo.stCropRect.u32Height = 1296;
-	}
-	
-	s32Ret = HI_MPI_VPSS_SetGrpCrop(VpssGrp, &stCropInfo);
-	if(s32Ret != HI_SUCCESS) {	
-		SAMPLE_PRT("HI_MPI_VPSS_SetGrpCrop failed with %#x\n", s32Ret);
-	}
-*/	
+
     for (i = 0; i < VPSS_MAX_PHY_CHN_NUM; i++)
     {
         if (pstParam->bChnEnable[i] == HI_TRUE)
@@ -884,11 +877,6 @@ HI_S32 SAMPLE_VENC_H265_H264(YJSNPI_VENC_CONFIG_S *pconf)
 	// 搞一个默认的 VPSS 设置到 stParam 中
     SAMPLE_VENC_GetDefaultVpssAttr(stViConfig.astViInfo[0].stSnsInfo.enSnsType, abChnEnable, stSize, &stParam);
 	
-/*	// 如果开了防抖就改成VPSS离线 
-	// For 3516ev300, DIS only works with VPSS Offline
-	if (pconf->dis == HI_TRUE) {
-		stParam.ViVpssMode     = VI_ONLINE_VPSS_OFFLINE;	
-	}*/
     /******************************************
       step 1: init sys alloc common vb
     ******************************************/
@@ -927,23 +915,26 @@ HI_S32 SAMPLE_VENC_H265_H264(YJSNPI_VENC_CONFIG_S *pconf)
         SAMPLE_PRT("VI Bind VPSS err for %#x!\n", s32Ret);
         goto EXIT_VPSS_STOP;
     }
-	
-	// 2轴消抖 效果几乎没有……并且必须让VPSS为离线模式
-	// 虽然内存是够的 但有待测试一下是否会增加延迟
 
-	// 算了 效果实在是没有
-	
-	/*
-	if (pconf->dis == HI_TRUE) {
-		ISP_DIS_ATTR_S stDisAttr;
-		stDisAttr.bEnable = HI_TRUE;
-		s32Ret = HI_MPI_ISP_SetDISAttr(0, &stDisAttr);
+	// awb speed
+	// 提高这个速度可以加快不同色温场景转换（如室内到室外）后自动白平衡的速度
+	if (pconf->awb_strength_custom == HI_TRUE) {
+		ISP_WB_ATTR_S stWBAttr;
+		s32Ret = HI_MPI_ISP_GetWBAttr(ViPipe, &stWBAttr);
 		if (s32Ret != HI_SUCCESS) {
-			SAMPLE_PRT("HI_MPI_ISP_SetDISAttr failed with %#x\n", s32Ret);
+			SAMPLE_PRT("HI_MPI_ISP_GetWBAttr failed with %#x\n", s32Ret);
+		}
+		//stWBAttr.stAuto.u8RGStrength = pconf->awb_strength_r;	// not used
+		//stWBAttr.stAuto.u8BGStrength = pconf->awb_strength_b;	// not used
+		stWBAttr.stAuto.u16Speed = pconf->awb_speed;
+		
+		s32Ret = HI_MPI_ISP_SetWBAttr(ViPipe, &stWBAttr);
+		if (s32Ret != HI_SUCCESS) {
+			SAMPLE_PRT("HI_MPI_ISP_SetWBAttr failed with %#x\n", s32Ret);
 			return HI_FAILURE;
 		}
+		
 	}
-	*/
 
    /******************************************
     start stream venc
