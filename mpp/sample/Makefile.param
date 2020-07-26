@@ -22,6 +22,7 @@ endif
 ####    BT656_2M_30FPS_8BIT                          #################
 ####    SONY_IMX307_2L_MIPI_2M_30FPS_12BIT           #################
 ####    SONY_IMX307_2L_MIPI_2M_30FPS_12BIT_WDR2TO1   #################
+####    SONY_IMX307_2L_MIPI_1M_60FPS_12BIT           #################
 ####    SONY_IMX327_2L_MIPI_2M_30FPS_12BIT           #################
 ####    SONY_IMX327_2L_MIPI_2M_30FPS_12BIT_WDR2TO1   #################
 ####    SMART_SC4236_MIPI_3M_30FPS_10BIT             #################
